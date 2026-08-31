@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfolio — Works</title>
+
+  <!-- Tailwind CSS (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brandBlue:   '#5A6BFF',
+            brandOrange: '#FF7A00',
+            ink:         '#0a0a0b',
+            panel:       '#141416',
+            line:        '#26262a'
+          },
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- React 18 + ReactDOM + Babel (CDN) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script src="assets.js"></script>
+
+  <style>
+    html, body { background:#000; color:#fff; font-family:'Inter', sans-serif; }
+    ::selection { background:#5A6BFF; color:#fff; }
+    .no-scrollbar::-webkit-scrollbar { display:none; }
+    .no-scrollbar { scrollbar-width:none; }
+    .net-pop{position:absolute;z-index:20;pointer-events:none;width:168px;height:104px;left:0;top:0;transform:translate(-50%,-50%) scale(.12);opacity:0;transition:transform .32s cubic-bezier(.2,.8,.25,1),opacity .3s ease}
+    .net-pop.show{transform:translate(-50%,-50%) scale(1);opacity:1}
+    .net-halo{position:absolute;inset:0;border-radius:14px;background:rgba(12,12,18,.94);border:1px solid rgba(255,255,255,.2);box-shadow:0 0 0 1px rgba(255,255,255,.06),0 0 30px 9px rgba(90,107,255,.5)}
+    .net-halo img,.net-halo video{position:absolute;inset:5px;width:calc(100% - 10px);height:calc(100% - 10px);border-radius:10px;object-fit:cover;background:#000}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // ---------- 类型 & 分类 识别 ----------
+    const TYPE_BY_EXT = {
+      jpg:'image', jpeg:'image', png:'image', webp:'image', gif:'image', avif:'image',
+      mp4:'video', webm:'video', mov:'video'
+    };
+    const CATEGORY_LABEL = { scene:'Scene', character:'Character', '3d':'3D', sketch:'Sketch', inspire:'Inspire' };
+    const TYPE_LABEL = { image:'Image', video:'Video' };
+
+    function catLabel(cat) {
+      return CATEGORY_LABEL[cat] || (cat ? cat.charAt(0).toUpperCase() + cat.slice(1) : '');
+    }
+
+    // 分类由「文件所在文件夹」决定；文件名只需体现 V(版本) 与 ref(参考)
+    function parseFile(src) {
+      const file = src.split('/').pop();
+      const ext  = (file.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+      const type = TYPE_BY_EXT[ext] || 'image';
+      const cm = src.match(/assets\/([^/]+)\//);
+      const category = cm ? cm[1].toLowerCase() : 'scene';
+      const base = file.replace(/\.[^.]+$/, '');
+      const parts = base.split('_').filter(Boolean);
+      let isRef = false, version = null;
+      const nameParts = [];
+      for (const p of parts) {
+        const lp = p.toLowerCase();
+        if (lp === 'ref' || lp.startsWith('ref')) { isRef = true; continue; }
+        const v = lp.match(/^v(\d+)$/);
+        if (v) { version = parseInt(v[1], 10); continue; }
+        nameParts.push(p);
+      }
+      const workName = nameParts.join(' ') || 'untitled';
+      return { src, file, category, type, isRef, version, workName, ext };
+    }
+
+    // 把文件按「作品」分组：同一个 分类+作品名 = 一件作品
+    function groupWorks(parsed) {
+      const map = new Map();
+      for (const a of parsed) {
+        const key = a.category + '::' + a.workName;
+        if (!map.has(key)) map.set(key, { category:a.category, workName:a.workName, versions:[], refs:[] });
+        const g = map.get(key);
+        if (a.isRef) g.refs.push(a); else g.versions.push(a);
+      }
+      const out = [];
+      for (const g of map.values()) {
+        g.versions.sort((x, y) => (x.version || 0) - (y.version || 0));
+        // 封面：优先用「图片」版本；没有图才用最后一个（可能是视频）
+        const imgs = g.versions.filter(v => v.type === 'image');
+        g.rep = imgs.length ? imgs[imgs.length - 1] : (g.versions[g.versions.length - 1] || g.refs[0]);
+        g.repIndex = g.versions.indexOf(g.rep);
+        g.hasVideo = g.versions.some(v => v.type === 'video');
+        out.push(g);
+      }
+      return out;
+    }
+
+    const RAW  = (window.RAW_FILES || []);
+    const ALL  = groupWorks(RAW.map(parseFile));
+
+    // ============ 媒体渲染（图片/视频） ============
+    function Media({ item, detail }) {
+      const style = { width:'100%', height:'100%', objectFit: detail ? 'contain' : 'cover', display:'block' };
+      if (item.type === 'video') {
+        return (
+          <video src={item.src} muted loop playsInline
+            controls={detail} autoPlay={detail}
+            className={'w-full h-full ' + (detail ? 'object-contain' : 'object-cover')} />
+        );
+      }
+      return <img src={item.src} alt={item.workName || item.file} loading="lazy" style={style} />;
+    }
+
+    // 视频卡片：hover 播放 / 移开暂停
+    function VideoCardMedia({ item }) {
+      const ref = React.useRef(null);
+      return (
+        <video ref={ref} src={item.src} muted loop playsInline preload="metadata"
+          className="w-full object-cover" style={{ minHeight:'300px' }}
+          onMouseEnter={() => ref.current && ref.current.play().catch(()=>{})}
+          onMouseLeave={() => ref.current && ref.current.pause()} />
+      );
+    }
+
+    // ============ 首页筛选条（根据实际作品分类动态生成） ============
+    function FilterBar({ filter, setFilter, counts, categories }) {
+      const items = [['all', 'All'], ...categories.map(c => [c, catLabel(c)])];
+      return (
+        <div className="flex flex-wrap items-center gap-3 mt-8">
+          {items.map(([k, label]) => {
+            const active = filter === k;
+            return (
+              <button key={k} onClick={() => setFilter(k)}
+                className={'px-4 py-2 rounded-full border text-sm font-medium transition ' +
+                  (active ? 'bg-brandBlue border-brandBlue text-white'
+                          : 'bg-transparent border-line text-white/70 hover:text-white hover:border-white/40')}>
+                {label}
+                <span className="ml-2 text-white/40">{counts[k] ?? 0}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ============ 首页卡片 ============
+    function WorkCard({ work, index, onOpen }) {
+      const rep = work.rep;
+      const isVideo = rep.type === 'video';
+      return (
+        <div className="mb-6 break-inside-avoid">
+          <div
+            onClick={() => onOpen(work)}
+            className="group relative cursor-pointer overflow-hidden rounded-3xl border border-line bg-panel">
+            {isVideo ? (
+              <VideoCardMedia item={rep} />
+            ) : (
+              <img src={rep.src} alt={rep.workName} loading="lazy"
+                className="w-full object-cover" style={{ minHeight:'260px' }} />
+            )}
+
+            <div className="absolute top-3 left-4 right-4 flex items-center justify-between text-[11px] uppercase tracking-widest text-white/70">
+              <span>{String(index + 1).padStart(2, '0')} /</span>
+              <div className="flex items-center gap-2">
+                {work.hasVideo && (
+                  <span className="px-2 py-0.5 rounded-full bg-brandBlue/85 text-white flex items-center gap-1">
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Video
+                  </span>
+                )}
+                <span className="px-2 py-0.5 rounded-full bg-black/40 backdrop-blur">{catLabel(work.category)}</span>
+              </div>
+            </div>
+
+            <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+              <h3 className="text-lg font-bold leading-tight">{work.workName}</h3>
+              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-white/60">
+                <span>{TYPE_LABEL[rep.type]}</span>
+                <span className="text-white/25">·</span>
+                {work.versions.length > 1 && <span>{work.versions.length} Versions</span>}
+                {work.versions.length > 1 && <span className="text-white/25">·</span>}
+                {work.refs.length > 0 && <span>{work.refs.length} Ref</span>}
+              </div>
+            </div>
+
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+              w-14 h-14 flex items-center justify-center rounded-full bg-white/15 backdrop-blur
+              border border-white/40 text-white opacity-0 group-hover:opacity-100 transition">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v6M8 11h6" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ 详情页（放大 / 版本滑动 / 参考图） ============
+    function Detail({ work, setSelected }) {
+      const [vi, setVi] = useState(Math.max(0, work.repIndex));
+      const [zoomRef, setZoomRef] = useState(null);
+      const versions = work.versions;
+      const refs = work.refs;
+      const current = versions[vi];
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.key === 'Escape') {
+            if (zoomRef) setZoomRef(null); else setSelected(null);
+          }
+          if (e.key === 'ArrowLeft'  && versions.length > 1) setVi(v => Math.max(0, v - 1));
+          if (e.key === 'ArrowRight' && versions.length > 1) setVi(v => Math.min(versions.length - 1, v + 1));
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [zoomRef, versions.length, setSelected]);
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/80 backdrop-blur-sm overflow-y-auto p-4 md:p-8"
+          onClick={() => zoomRef ? setZoomRef(null) : setSelected(null)}>
+          <div className="relative w-full max-w-6xl rounded-3xl border border-line bg-panel shadow-2xl my-auto"
+            onClick={(e) => e.stopPropagation()}>
+
+            <div className="flex items-center justify-between gap-4 p-5 border-b border-line">
+              <div className="min-w-0">
+                <h2 className="text-2xl font-extrabold truncate">{work.workName}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/60">
+                  <span className="px-2 py-0.5 rounded-full bg-white/10">{catLabel(work.category)}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-white/10">{TYPE_LABEL[current ? current.type : 'image']}</span>
+                  {versions.length > 1 && <span>{versions.length} versions</span>}
+                </div>
+              </div>
+              <button onClick={() => setSelected(null)}
+                className="flex items-center gap-2 px-4 py-2 rounded-full border border-line text-sm text-white/70 hover:text-white hover:border-white/40 transition">
+                Close
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <div className="relative h-[46vh] md:h-[58vh] bg-black">
+              {current && <div className="w-full h-full"><Media item={current} detail /></div>}
+              {versions.length > 1 && (<>
+                <button onClick={() => setVi(v => Math.max(0, v - 1))} disabled={vi === 0}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 border border-white/30 text-white flex items-center justify-center transition disabled:opacity-20">‹</button>
+                <button onClick={() => setVi(v => Math.min(versions.length - 1, v + 1))} disabled={vi === versions.length - 1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 border border-white/30 text-white flex items-center justify-center transition disabled:opacity-20">›</button>
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+                  {versions.map((_, i) => (
+                    <button key={i} onClick={() => setVi(i)}
+                      className={'w-2.5 h-2.5 rounded-full transition ' + (i === vi ? 'bg-brandOrange' : 'bg-white/40')} />
+                  ))}
+                </div>
+              </>)}
+            </div>
+
+            {versions.length > 1 && current && (
+              <div className="px-5 pt-3 text-center text-sm text-white/60">
+                Version {current.version || (vi + 1)} / {versions.length}
+              </div>
+            )}
+
+            {refs.length > 0 && (
+              <div className="p-5 md:p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold uppercase tracking-wider text-white/70">References</h4>
+                  <span className="text-xs text-white/40">Click a reference to zoom</span>
+                </div>
+                <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+                  {refs.map((r, i) => (
+                    <button key={i} onClick={() => setZoomRef(r)}
+                      className="relative shrink-0 w-24 h-24 md:w-28 md:h-28 overflow-hidden rounded-xl border border-line hover:border-brandBlue transition group">
+                      <img src={r.src} alt={r.file} loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <span className="absolute bottom-1 right-1 text-[10px] text-white/70 bg-black/50 rounded px-1">ref</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {zoomRef && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur p-6"
+              onClick={() => setZoomRef(null)}>
+              <div onClick={(e) => e.stopPropagation()} className="relative max-w-4xl w-full">
+                <button onClick={() => setZoomRef(null)}
+                  className="absolute -top-11 right-0 flex items-center gap-2 px-3 py-2 rounded-full bg-white/10 text-sm hover:bg-white/20 transition">Close</button>
+                <img src={zoomRef.src} alt={zoomRef.file}
+                  className="w-full max-h-[78vh] object-contain rounded-2xl" />
+                <p className="mt-3 text-center text-sm text-white/60">{zoomRef.file}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============ Hero ============
+    function Hero({ onButton }) {
+      return (
+        <header className="max-w-7xl mx-auto px-5 md:px-8 pt-14 md:pt-20 pb-8">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+            <h1 className="text-[clamp(2rem,7vw,4.5rem)] font-extrabold leading-[1.05] tracking-tight">
+              They called the hills green.<br />
+              I saw the farthest mountains blue.
+              <span className="block text-white/45 font-semibold">I go toward the bluest.</span>
+            </h1>
+            <button onClick={onButton}
+              className="self-start shrink-0 flex items-center gap-2 px-6 py-3 rounded-full border border-white/25 text-sm font-medium text-white hover:border-white transition group">
+              View Selected Work
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
+                <path d="M7 17 17 7M7 7h10v10" />
+              </svg>
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    // ============ 网络图（sketch / inspire 专用） ============
+    function NetworkGraph({ cat, items, onOpen }) {
+      const wrapRef = useRef(null);
+      const canvasRef = useRef(null);
+      const popRef = useRef(null);
+      const popImgRef = useRef(null);
+      const popVidRef = useRef(null);
+      const popHaloRef = useRef(null);
+      const countRef = useRef(null);
+
+      useEffect(() => {
+        const canvas = canvasRef.current, wrap = wrapRef.current;
+        const pop = popRef.current, popImg = popImgRef.current, popVid = popVidRef.current, popHalo = popHaloRef.current;
+        if (!canvas || !wrap || !pop) return;
+        const ctx = canvas.getContext('2d');
+        let dpr = Math.min(window.devicePixelRatio || 1, 2), W = 0, H = 0;
+        function resize(){ W = wrap.clientWidth; H = wrap.clientHeight; canvas.width = W*dpr; canvas.height = H*dpr; canvas.style.width = W+'px'; canvas.style.height = H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
+        resize();
+        const ro = new ResizeObserver(resize); ro.observe(wrap);
+
+        const catWorks = groupWorks(items);
+        let zoom = 1, panX = 0, panY = 0, t = 0, nodes = [], edges = [];
+        const imgCache = {};
+        const getImg = s => { if(!imgCache[s]){ const im = new Image(); im.src = s; imgCache[s] = im; } return imgCache[s]; };
+        const w2s = (x,y) => ({ x:x*zoom+panX, y:y*zoom+panY });
+        const s2w = (x,y) => ({ x:(x-panX)/zoom, y:(y-panY)/zoom });
+
+        function simTokens(name){ return name.toLowerCase().replace(/\.[a-z0-9]+$/i,'').split(/[^a-z0-9\u4e00-\u9fff]+/).filter(s=>s.length>1 && !/^v\d+$/.test(s) && s!=='ref' && s!=='copy' && s!=='the' && s!=='and'); }
+        function jaccard(a,b){ if(!a.length||!b.length) return 0; const s=new Set(a); let inter=0; const seen=new Set(); for(const x of b){ if(s.has(x)&&!seen.has(x)){inter++;seen.add(x);} } return inter/(a.length+b.length-inter); }
+        function buildEdges(list){ const n=list.length; const toks=list.map(nd=>simTokens(nd.item.file)); const pairs=[]; for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)pairs.push({i,j,s:jaccard(toks[i],toks[j])}); pairs.sort((a,b)=>b.s-a.s); const par=[...Array(n)].map((_,i)=>i); const find=x=>par[x]===x?x:(par[x]=find(par[x])); const ed=[]; const deg=new Array(n).fill(0); for(const p of pairs){ const ri=find(p.i), rj=find(p.j); if((ri!==rj||p.s>0.28)&&deg[p.i]<5&&deg[p.j]<5){ par[ri]=rj; ed.push(p); deg[p.i]++; deg[p.j]++; } } return ed; }
+
+        function hslToRgb(h,s,l){ s/=100; l/=100; const c=(1-Math.abs(2*l-1))*s, hp=((h%360)+360)%360/60, x=c*(1-Math.abs(hp%2-1)); let r=0,g=0,b=0; if(hp>=0&&hp<1){r=c;g=x;} else if(hp<2){r=x;g=c;} else if(hp<3){g=c;b=x;} else if(hp<4){g=x;b=c;} else if(hp<5){r=x;b=c;} else {r=c;b=x;} const m=l-c/2; return [Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)]; }
+        function hslToRgba(h,s,l,a){ const p=hslToRgb(h,s,l); return 'rgba('+p[0]+','+p[1]+','+p[2]+','+a+')'; }
+        function nodeColor(item){ const hue=item.type==='video'?26:231; const sat=item.isRef?34:(item.type==='video'?80:70); let light=item.isRef?56:62; if(item.version) light=Math.max(38,74-(item.version-1)*8); return { col:'hsl('+hue+','+sat+'%,'+light+'%)', glow:hslToRgba(hue,Math.min(90,sat),Math.min(light+10,78),0.55) }; }
+
+        function build(){
+          (nodes||[]).forEach(nd=>{ if(nd.video){ nd.video.pause(); nd.video.removeAttribute('src'); nd.video.load(); } });
+          const R2 = Math.min(W,H)*0.34;
+          nodes = items.map((item,i)=>{ const ang=i/items.length*6.283; const c=nodeColor(item);
+            const nd = { i, item, x:W/2+R2*Math.cos(ang), y:H/2+R2*Math.sin(ang), vx:0, vy:0, r:3+Math.random()*3, phase:Math.random()*6.28, pinned:false, hovered:false, col:c.col, colGlow:c.glow };
+            if(item.type==='video'){ const v=document.createElement('video'); v.src=item.src; v.muted=true; v.loop=true; v.playsInline=true; v.autoplay=true; v.preload='auto'; v.play().catch(()=>{}); nd.video=v; }
+            return nd; });
+          edges = buildEdges(nodes);
+          if(countRef.current) countRef.current.textContent = cat + ' · ' + nodes.length + ' 节点 · ' + edges.length + ' 连线';
+        }
+        const REP_R=110, REP_K=0.6, GRAV=0.0015, REST=130, SPRING=0.012, DAMP=0.86, MARG=36;
+        function step(){ t++; const n=nodes.length;
+          for(let i=0;i<n;i++){ const a=nodes[i]; for(let j=i+1;j<n;j++){ const b=nodes[j]; const dx=a.x-b.x, dy=a.y-b.y; let d=Math.hypot(dx,dy)||1; if(d<REP_R){ const f=(1-d/REP_R)*REP_K, ux=dx/d, uy=dy/d; a.vx+=ux*f; a.vy+=uy*f; b.vx-=ux*f; b.vy-=uy*f; } } a.vx+=(W/2-a.x)*GRAV; a.vy+=(H/2-a.y)*GRAV; }
+          for(const e of edges){ const a=nodes[e.i], b=nodes[e.j]; const dx=b.x-a.x, dy=b.y-a.y; let d=Math.hypot(dx,dy)||1; const f=(d-REST)*SPRING, ux=dx/d, uy=dy/d; a.vx+=ux*f; a.vy+=uy*f; b.vx-=ux*f; b.vy-=uy*f; }
+          for(const a of nodes){ if(a.pinned) continue; a.vx*=DAMP; a.vy*=DAMP; a.x+=a.vx; a.y+=a.vy; a.x=Math.max(MARG,Math.min(W-MARG,a.x)); a.y=Math.max(MARG,Math.min(H-MARG,a.y)); } }
+
+        function draw(){ ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+          const cx=W/2, cy=H/2, R=Math.min(W,H)*0.5;
+          for(let k=1;k<=5;k++){ ctx.beginPath(); ctx.arc(cx,cy,k/5*R,0,7); ctx.strokeStyle='rgba(120,140,255,0.05)'; ctx.lineWidth=1; ctx.stroke(); }
+          ctx.strokeStyle='rgba(120,140,255,0.035)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
+          ctx.setTransform(dpr*zoom,0,0,dpr*zoom,dpr*panX,dpr*panY);
+          for(const e of edges){ const a=nodes[e.i], b=nodes[e.j]; const al=0.06+Math.min(0.5,e.s)*0.45; ctx.strokeStyle='rgba(140,150,255,'+al.toFixed(3)+')'; ctx.lineWidth=1/zoom; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+          const breath=1+0.06*Math.sin(t*0.0014);
+          for(const a of nodes){ const pulse=0.94+0.06*Math.sin(t*0.003+a.phase); const r=a.r*breath*pulse*(a.hovered?1.45:1);
+            ctx.globalAlpha=0.14; ctx.fillStyle=a.col; ctx.beginPath(); ctx.arc(a.x,a.y,r*2.4,0,7); ctx.fill(); ctx.globalAlpha=1;
+            if(r*zoom>12){ ctx.save(); ctx.beginPath(); ctx.arc(a.x,a.y,r,0,7); ctx.clip(); if(a.item.type==='video'){ if(a.video&&a.video.readyState>=2) ctx.drawImage(a.video,a.x-r,a.y-r,2*r,2*r); else { ctx.fillStyle=a.col; ctx.fillRect(a.x-r,a.y-r,2*r,2*r); } } else { const im=getImg(a.item.src); if(im.complete&&im.naturalWidth) ctx.drawImage(im,a.x-r,a.y-r,2*r,2*r); else { ctx.fillStyle=a.col; ctx.fillRect(a.x-r,a.y-r,2*r,2*r); } } ctx.restore(); if(a.item.type==='video'){ ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(a.x,a.y,r*0.4,0,7); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(a.x-r*0.16,a.y-r*0.28); ctx.lineTo(a.x-r*0.16,a.y+r*0.28); ctx.lineTo(a.x+r*0.3,a.y); ctx.closePath(); ctx.fill(); } } else { ctx.fillStyle=a.col; ctx.beginPath(); ctx.arc(a.x,a.y,r,0,7); ctx.fill(); }
+            ctx.strokeStyle='rgba(255,255,255,'+(a.hovered?0.55:0.22)+')'; ctx.lineWidth=1/zoom; ctx.beginPath(); ctx.arc(a.x,a.y,r,0,7); ctx.stroke(); } }
+
+        let raf; function loop(){ step(); draw(); if(hoverIdx>=0&&dragIdx<0){ const a=nodes[hoverIdx]; const sp=w2s(a.x,a.y); pop.style.left=sp.x+'px'; pop.style.top=sp.y+'px'; } raf=requestAnimationFrame(loop); }
+
+        function hitTest(x,y){ let best=-1,bd=1e9; for(let i=0;i<nodes.length;i++){ const a=nodes[i]; const d=Math.hypot(x-a.x,y-a.y); if(d<bd){bd=d;best=i;} } if(best>=0 && bd<Math.max(nodes[best].r*3.2,18)) return best; return -1; }
+        function pos(e){ const r=canvas.getBoundingClientRect(); return s2w(e.clientX-r.left, e.clientY-r.top); }
+        let hoverIdx=-1, dragIdx=-1, moved=0, panning=false, panStart={x:0,y:0}, pan0={x:0,y:0}, lastClient={x:0,y:0};
+        function hidePop(){ pop.classList.remove('show'); popVid.pause(); }
+        function showPop(i){ const a=nodes[i]; popImg.style.display='none'; popVid.style.display='none'; if(a.item.type==='video'){ popVid.style.display='block'; popVid.src=a.item.src; popVid.play().catch(()=>{}); } else { popImg.style.display='block'; popImg.src=a.item.src; } const sp=w2s(a.x,a.y); pop.style.left=sp.x+'px'; pop.style.top=sp.y+'px'; popHalo.style.boxShadow='0 0 0 1px rgba(255,255,255,.08), 0 0 30px 9px '+a.colGlow; pop.classList.add('show'); }
+        function setHover(i){ if(hoverIdx===i) return; hoverIdx=i; for(let k=0;k<nodes.length;k++) nodes[k].hovered=(k===i); hidePop(); if(i>=0) showPop(i); }
+        function openWork(a){ const w = catWorks.find(x=>x.category===cat && x.workName===a.item.workName); if(w) onOpen(w); }
+        function onDown(e){ if(panning) return; if(e.button===1){ e.preventDefault(); setHover(-1); panning=true; panStart={x:e.clientX,y:e.clientY}; pan0={x:panX,y:panY}; canvas.setPointerCapture(e.pointerId); return; } const p=pos(e); const i=hitTest(p.x,p.y); if(i>=0){ dragIdx=i; moved=0; nodes[i].pinned=true; } }
+        function onMove(e){ lastClient={x:e.clientX,y:e.clientY}; if(panning){ panX=pan0.x+(e.clientX-panStart.x); panY=pan0.y+(e.clientY-panStart.y); return; } const p=pos(e); if(dragIdx>=0){ const a=nodes[dragIdx]; moved+=Math.hypot(p.x-a.x,p.y-a.y); a.x=p.x; a.y=p.y; a.vx=0; a.vy=0; hidePop(); } else { setHover(hitTest(p.x,p.y)); } }
+        function onUp(){ if(panning){ panning=false; return; } if(dragIdx>=0){ const wasClick=(moved*zoom)<6; nodes[dragIdx].pinned=false; if(wasClick) openWork(nodes[dragIdx]); dragIdx=-1; } }
+        function onCancel(){ panning=false; dragIdx=-1; }
+        function onLeave(){ setHover(-1); }
+        function onWheel(e){ e.preventDefault(); const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top; const f=e.deltaY<0?1.12:0.89; const nz=Math.min(4,Math.max(0.45,zoom*f)); if(nz>zoom){ const wx=(mx-panX)/zoom, wy=(my-panY)/zoom; zoom=nz; panX=mx-wx*nz; panY=my-wy*nz; } else { zoom=nz; panX=(W/2)*(1-zoom); panY=(H/2)*(1-zoom); } }
+        function onCtx(e){ e.preventDefault(); }
+        function onAux(e){ if(e.button===1) e.preventDefault(); }
+
+        canvas.addEventListener('pointerdown',onDown);
+        canvas.addEventListener('pointermove',onMove);
+        canvas.addEventListener('pointerup',onUp);
+        canvas.addEventListener('pointercancel',onCancel);
+        canvas.addEventListener('pointerleave',onLeave);
+        canvas.addEventListener('contextmenu',onCtx);
+        canvas.addEventListener('auxclick',onAux);
+        canvas.addEventListener('wheel',onWheel,{passive:false});
+
+        (function boot(){ if(W > 0 && H > 0){ build(); loop(); } else { requestAnimationFrame(boot); } })();
+        return () => {
+          cancelAnimationFrame(raf); ro.disconnect();
+          canvas.removeEventListener('pointerdown',onDown);
+          canvas.removeEventListener('pointermove',onMove);
+          canvas.removeEventListener('pointerup',onUp);
+          canvas.removeEventListener('pointercancel',onCancel);
+          canvas.removeEventListener('pointerleave',onLeave);
+          canvas.removeEventListener('contextmenu',onCtx);
+          canvas.removeEventListener('auxclick',onAux);
+          canvas.removeEventListener('wheel',onWheel);
+          (nodes||[]).forEach(nd=>{ if(nd.video){ nd.video.pause(); nd.video.removeAttribute('src'); nd.video.load(); } });
+        };
+      }, [cat, items, onOpen]);
+      return (
+        <div ref={wrapRef} className="relative mt-6 h-[74vh] rounded-3xl border border-line bg-panel overflow-hidden" style={{ minHeight: '60vh' }}>
+          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ touchAction:'none' }} />
+          <div className="absolute top-4 left-5 right-5 flex items-center justify-between pointer-events-none">
+            <span className="text-[11px] uppercase tracking-widest text-white/50">Network — {catLabel(cat)}</span>
+            <span ref={countRef} className="text-[11px] text-white/40"></span>
+          </div>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-white/40 pointer-events-none whitespace-nowrap">
+            滚轮缩放 · 中键拖动 · 左键拖拽节点 · 靠近展开光晕缩略图 · 单击看详情
+          </div>
+          <div ref={popRef} className="net-pop"><div className="net-halo"><img ref={popImgRef} alt="" /><video ref={popVidRef} muted loop playsInline></video></div></div>
+        </div>
+      );
+    }
+
+    // ============ 根组件 ============
+    const SPECIAL_CATS = ['sketch','inspire'];
+    function App() {
+      const [filter, setFilter] = useState('all');
+      const [selected, setSelected] = useState(null);
+
+      useEffect(() => {
+        document.body.style.overflow = selected ? 'hidden' : '';
+        return () => { document.body.style.overflow = ''; };
+      }, [selected]);
+
+      const categories = useMemo(() => {
+        const set = new Set(ALL.map(w => w.category));
+        const order = ['scene', 'character', '3d', 'sketch', 'inspire'];
+        const known = order.filter(c => set.has(c));
+        const unknown = Array.from(set).filter(c => !order.includes(c));
+        return [...known, ...unknown];
+      }, []);
+      const counts = useMemo(() => {
+        const c = { all: 0 };
+        ALL.forEach(w => { c[w.category] = (c[w.category] || 0) + 1; if(!SPECIAL_CATS.includes(w.category)) c.all++; });
+        return c;
+      }, []);
+
+      const isNetwork = SPECIAL_CATS.includes(filter);
+      const visible = filter === 'all' ? ALL.filter(w => !SPECIAL_CATS.includes(w.category)) : ALL.filter(w => w.category === filter);
+      const netItems = useMemo(() => RAW.map(parseFile).filter(a => a.category === filter), [filter]);
+
+      return (
+        <div className="min-h-screen bg-black text-white">
+          <Hero onButton={() => document.getElementById('works')?.scrollIntoView({ behavior:'smooth' })} />
+          <section id="works" className="max-w-7xl mx-auto px-5 md:px-8 pb-24">
+            <FilterBar filter={filter} setFilter={setFilter} counts={counts} categories={categories} />
+            {isNetwork ? (
+              <NetworkGraph cat={filter} items={netItems} onOpen={setSelected} />
+            ) : (
+              <>
+                <div className="mt-6 columns-1 sm:columns-2 lg:columns-3 [column-gap:1.25rem]">
+                  {visible.map((w, i) => (
+                    <WorkCard key={w.category + w.workName} work={w} index={i} onOpen={setSelected} />
+                  ))}
+                </div>
+                {visible.length === 0 && (
+                  <p className="mt-16 text-center text-white/40">No works in this category yet.</p>
+                )}
+              </>
+            )}
+          </section>
+          <footer className="border-t border-line py-8 text-center text-sm text-white/40">
+            © {new Date().getFullYear()} — Designer Portfolio
+          </footer>
+          {selected && <Detail work={selected} setSelected={setSelected} />}
+        </div>
+      );
+    }
+
+    class ErrorBoundary extends React.Component {
+      constructor(props){ super(props); this.state = { error: null }; }
+      static getDerivedStateFromError(error){ return { error }; }
+      componentDidCatch(error, info){ console.error('Render error:', error, info); }
+      render(){
+        if (this.state.error){
+          return (
+            <div style={{ padding:40, color:'#ff6b6b', background:'#000', fontFamily:'monospace', whiteSpace:'pre-wrap', minHeight:'100vh' }}>
+              <b>Something went wrong while rendering. Please copy this message and tell me:</b>
+              <pre style={{ marginTop:12 }}>{String((this.state.error && this.state.error.message) || this.state.error)}</pre>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <ErrorBoundary><App /></ErrorBoundary>
+    );
+
+
+  </script>
+</body>
+</html>
